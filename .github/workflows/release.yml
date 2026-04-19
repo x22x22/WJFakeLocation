@@ -4,10 +4,18 @@ on:
   push:
     tags:
       - 'v*'  # 匹配 v1.0.0, v2.0.0-rc1 等版本标签
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '版本号 (例如: 2.0.0)'
+        required: false
+        default: '2.0.0'
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     
     steps:
       - name: Checkout code
@@ -23,20 +31,29 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
       
+      - name: Determine version
+        id: get_version
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          fi
+      
       - name: Build Debug APK
         run: ./gradlew assembleDebug
+        env:
+          VERSION_NAME: ${{ steps.get_version.outputs.VERSION }}
       
       - name: Build Release APK (without signing)
         run: ./gradlew assembleRelease
-      
-      - name: Get version from tag
-        id: get_version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+        env:
+          VERSION_NAME: ${{ steps.get_version.outputs.VERSION }}
       
       - name: Create Release
-        uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.get_version.outputs.VERSION }}
           name: Release v${{ steps.get_version.outputs.VERSION }}
           body: |
             ## WJFakeLocation v${{ steps.get_version.outputs.VERSION }}
@@ -45,12 +62,12 @@ jobs:
             - 自动构建发布
             
             ### 📦 安装包
-            - `app-debug.apk` - 调试版本（包含完整日志）
+            - `app-debug.apk` - 调试版本（包含完整日志，可直接安装）
             - `app-release-unsigned.apk` - 未签名 Release 版本
             
             ### ⚠️ 注意事项
+            - 建议直接使用 `app-debug.apk` 安装体验
             - Release 版本需要手动签名才能安装
-            - 建议使用Android Studio 或 jarsigner 进行签名
           files: |
             app/build/outputs/apk/debug/app-debug.apk
             app/build/outputs/apk/release/app-release-unsigned.apk
